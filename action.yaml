@@ -1,4 +1,6 @@
 name: Sync Notion to GitHub
+icon: arrow-down-circle
+color: blue
 description: 'This is a GitHub Action that syncs Notion to GitHub.'
 inputs:
   notion_token:

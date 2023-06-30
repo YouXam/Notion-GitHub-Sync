@@ -12,10 +12,12 @@ from notion2md.exporter.block import MarkdownExporter
 from notion_client import AsyncClient
 from dateutil import parser as dateutil
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG if os.environ.get("debug") else logging.INFO)
+
 
 def extrat_block_id(url):
     return url.split('/')[-1].split('?')[0].split('-')[-1]
+
 
 def extrat_front_matter(path):
     front_matter = {}
@@ -30,42 +32,56 @@ def extrat_front_matter(path):
     front_matter = yaml.load(front_matter_str, Loader=yaml.FullLoader)
     return front_matter
 
-async def try_to_update(path):
+
+async def update_file(path, block_id=None):
     logging.debug(f"updating {path}")
+
     notion = AsyncClient(auth=os.environ["NOTION_TOKEN"])
-    front_matter = extrat_front_matter(path)
+    if os.path.isfile(path):
+        front_matter = extrat_front_matter(path)
+        if front_matter.get('notion_url') is None and front_matter.get('notion-url') is None and block_id is None:
+            logging.debug(f"{front_matter.get('notion_url')=} and {front_matter.get('notion-url')=}, skip")
+            return
+    else:
+        front_matter = {}
     logging.debug(f"{front_matter=}")
-    if front_matter.get('notion_url') is None and front_matter.get('notion-url') is None:
-        logging.debug(f"{front_matter.get('notion_url')=} and {front_matter.get('notion-url')=}, skip")
-        return
-    url = front_matter.get('notion_url') or front_matter.get('notion-url')
-    block_id = extrat_block_id(url)
+    
+    if block_id is None:
+        url = front_matter.get('notion_url') or front_matter.get('notion-url')
+        block_id = extrat_block_id(url)
     logging.debug(f"{block_id=}")
     
     page = await notion.pages.retrieve(page_id=block_id)
     logging.debug(f"{page=}")
+
+    if_update = False
     try:
-        title = page["properties"]["title"]["title"][0]["plain_text"]
-        front_matter['title'] = title
+        title = page["properties"].get("Name") or page["properties"]['title']
+        title = title["title"][0]["plain_text"]
+        if front_matter.get('title') != title:
+            front_matter['title'] = title
+            if_update = True
     except Exception as e:
-        pass
+        logging.warning(e)
     last_edited_time = page['last_edited_time']
     last_edited_time = last_edited_time.replace('T', ' ').replace('Z', '')
     logging.debug(f"{last_edited_time=}")
     if front_matter.get('last_edited_time') is not None:
         remote_last_edited_time_timestamp = dateutil.parse(last_edited_time).timestamp()
         local_last_edited_time_timestamp = dateutil.parse(front_matter['last_edited_time']).timestamp()
-        if remote_last_edited_time_timestamp <= local_last_edited_time_timestamp:
-            print(f'[-] {path} is up to date, skip.')
-            return
+        if remote_last_edited_time_timestamp > local_last_edited_time_timestamp:
+            if_update = True
+    if not if_update:
+        print(f'[-] {path} is up to date, skip.')
+        return
     front_matter['last_edited_time'] = last_edited_time
     
     MarkdownExporter(block_id=block_id,output_path='.',download=True).export()
     with zipfile.ZipFile(f'{block_id}.zip', 'r') as zip_ref:
-        zip_ref.extractall(f'{block_id}')
+        zip_ref.extractall(f'{block_id}_tmp')
     os.remove(f'{block_id}.zip')
     try:
-        with open(f'{block_id}/{block_id}.md', 'r') as f:
+        with open(f'{block_id}_tmp/{block_id}.md', 'r') as f:
             content = f.read()
             logging.debug(f"{content=}")
         front_matter_all_str = yaml.dump(front_matter, sort_keys=False, indent=2, allow_unicode=True)
@@ -78,21 +94,38 @@ async def try_to_update(path):
         logging.error("Error:" + str(e))
         return
     finally:
-        os.remove(f'{block_id}/{block_id}.md')
+        os.remove(f'{block_id}_tmp/{block_id}.md')
     try:
         path_dir = os.path.dirname(path)
-        for file in glob.glob(f'{block_id}/*'):
+        for file in glob.glob(f'{block_id}_tmp/*'):
             if os.path.isdir(file):
-                shutil.copytree(f'{file}', path_dir)
+                shutil.copytree(file, path_dir)
             else:
-                shutil.copy(f'{file}', path_dir)
+                shutil.copy(file, path_dir)
     except Exception as e:
         logging.error("Error:" + str(e))
         return
     finally:
-        shutil.rmtree(f'{block_id}')
-    print(f"[+] {full_path} is successfully updated.")
+        shutil.rmtree(f'{block_id}_tmp')
+    print(f"[+] {path} is successfully updated.")
 
+
+async def update_list(path):
+    with open(path, "r") as f:
+        database_id = f.read()
+    database_id = extrat_block_id(database_id)
+    notion = AsyncClient(auth=os.environ["NOTION_TOKEN"])
+    res = await notion.databases.query(database_id=database_id)
+    assert res["object"] == "list"
+    for page in res["results"]:
+        logging.debug(f"{page['id']=}")
+        try:
+            os.mkdir(page["id"])
+        except:
+            pass
+        begin = time.time()
+        await update_file(f"{page['id']}/{page['id']}.md", page["id"])
+        time.sleep(max(0, 1 - (time.time() - begin)))
 
 print("====== notion-sync ======")
 if __name__ == '__main__':
@@ -108,18 +141,24 @@ if __name__ == '__main__':
     
     for (root, dirs, files) in os.walk(sys.argv[1]):
         for file in files:
-            if file.endswith('.md'):
-                logging.debug(f"found {file}")
-                full_path = os.path.join(root, file)
-                try:
+            full_path = os.path.join(root, file)
+            try:
+                if file.endswith('.md'):
                     begin = time.time()
-                    asyncio.run(try_to_update(full_path))
+                    logging.debug(f"found file {file}")
+                    asyncio.run(update_file(full_path))
                     time.sleep(max(0, 1 - (time.time() - begin)))
-                except Exception as e:
-                    failed = True
-                    print("[!] An error was encountered when update", full_path, ":")
-                    import traceback
-                    traceback.print_exception(type(e), e, e.__traceback__)
+                elif file.endswith(".notion_list"):
+                    logging.debug(f"found list {file}")
+                    asyncio.run(update_list(full_path))
+            except Exception as e:
+                failed = True
+                print("[!] An error was encountered when update", full_path, ":")
+                import traceback
+                traceback.print_exception(type(e), e, e.__traceback__)
+            
+
+
     
     if failed:
         exit(1)

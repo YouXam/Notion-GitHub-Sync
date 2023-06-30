@@ -119,12 +119,11 @@ async def update_list(path):
     assert res["object"] == "list"
     for page in res["results"]:
         logging.debug(f"{page['id']=}")
-        try:
-            os.mkdir(page["id"])
-        except:
-            pass
+        fpath = os.path.join(os.path.dirname(path), f"notion/{page['id']}")
+        if not os.path.exists(fpath):
+            os.makedirs(fpath)
         begin = time.time()
-        await update_file(f"{page['id']}/{page['id']}.md", page["id"])
+        await update_file(os.path.join(fpath, f"{page['id']}.md"), page["id"])
         time.sleep(max(0, 1 - (time.time() - begin)))
 
 print("====== notion-sync ======")

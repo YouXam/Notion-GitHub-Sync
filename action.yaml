@@ -8,6 +8,9 @@ inputs:
   notion_token:
     description: 'The notion api token.'
     required: true
+  author:
+    description: "Articles's author. If left blank, then get from notion."
+    required: false
 runs:
   using: 'composite'
   steps:
@@ -36,7 +39,7 @@ runs:
     - name: Sync Notion to Github
       shell: bash
       run: |
-        python ${{ github.workspace }}/notion-sync/main.py ${{ github.workspace }}/github/ ${{ inputs.notion_token }}
+        python ${{ github.workspace }}/notion-sync/main.py ${{ github.workspace }}/github/ ${{ inputs.notion_token }} ${{ inputs.author }}
 
     - name: Commit and push if changes
       shell: bash

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Github API Example</title>
+    <script src="https://unpkg.com/vue@2.6.14/dist/vue.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@3.1.7/dist/full.css" rel="stylesheet" type="text/css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body>
+    <div id="app" class="flex  items-center justify-center h-screen">
+        <div v-if="!owner || !repo || !workflowId" class="flex flex-col">
+            <input v-model="apiKey" placeholder="Enter Github API Key" class="input m-2">
+            <button @click="fetchRepos" class="btn btn-primary m-2" :disabled="disabled">Submit</button>
+            <select v-model="selectedRepo" v-if="repos.length" class="select m-2" @change="fetchWorkflows">
+                <option value="" disabled selected>Select a repo</option>
+                <option v-for="repo in repos" :value="repo">{{ repo.full_name }}</option>
+            </select>
+            <select v-model="selectedWorkflow" v-if="workflows.length" class="select m-2">
+                <option value="" disabled selected>Select a workflow</option>
+                <option v-for="workflow in workflows" :value="workflow.id">{{ workflow.name }}</option>
+            </select>
+            <button @click="generateLink" class="btn btn-primary m-2" v-if="selectedWorkflow">Generate Link</button>
+        </div>
+        <button @click="dispatchWorkflow" class="btn btn-primary m-2"
+            v-if="owner && repo && workflowId">{{ !run ? "Run Workflow" : "Run successfully"}}</button>
+    </div>
+    <script>
+        var app = new Vue({
+            el: '#app',
+            data: {
+                apiKey: new URLSearchParams(window.location.search).get('apiKey') || '',
+                repos: [],
+                selectedRepo: '',
+                workflows: [],
+                selectedWorkflow: '',
+                disabled: false,
+                run: false,
+                owner: new URLSearchParams(window.location.search).get('owner'),
+                repo: new URLSearchParams(window.location.search).get('repo'),
+                workflowId: new URLSearchParams(window.location.search).get('workflowId')
+            },
+            methods: {
+                fetchRepos: function () {
+                    this.disabled = true
+                    fetch("https://api.github.com/user/repos", {
+                        method: "GET",
+                        headers: {
+                            "Accept": "application/vnd.github+json",
+                            "Authorization": "Bearer " + this.apiKey,
+                            "X-GitHub-Api-Version": "2022-11-28"
+                        }
+                    })
+                        .then(response => response.json())
+                        .then(data => {
+                            this.repos = data;
+                            this.disabled = false
+                        })
+                        .catch(error => {
+                            this.disabled = false
+                            alert('Error:', JSON.stringify(error))
+                        });
+                },
+                fetchWorkflows: function () {
+                    console.log(this.selectedRepo)
+                    fetch(`https://api.github.com/repos/${this.selectedRepo.owner.login}/${this.selectedRepo.name}/actions/workflows`, {
+                        method: "GET",
+                        headers: {
+                            "Accept": "application/vnd.github+json",
+                            "Authorization": "Bearer " + this.apiKey,
+                            "X-GitHub-Api-Version": "2022-11-28"
+                        }
+                    })
+                        .then(response => response.json())
+                        .then(data => {
+                            this.workflows = data.workflows;
+                        })
+                        .catch(error => console.error('Error:', error));
+                },
+                dispatchWorkflow: function () {
+                    this.disabled = true
+                    fetch(`https://api.github.com/repos/${this.owner}/${this.repo}/actions/workflows/${this.workflowId}/dispatches`, {
+                        method: "POST",
+                        headers: {
+                            "Accept": "application/vnd.github+json",
+                            "Authorization": "Bearer " + this.apiKey,
+                            "X-GitHub-Api-Version": "2022-11-28"
+                        },
+                        body: JSON.stringify({ ref: "main" })
+                    })
+                        .then(response => {
+                            this.disabled = false
+                            if (!response.ok) {
+                                alert('Error:', response.statusText)
+                                throw new Error('Network response was not ok');
+                            } else {
+                                this.run = true
+                                setTimeout(() => {
+                                    this.run = false
+                                }, 1000);
+                            }
+                        })
+                        .catch(error => {
+                            this.disabled = false
+                            alert('Error:', JSON.stringify(error))
+                            console.error('Error:', error)
+                        });
+                },
+                generateLink: function () {
+                    window.location.href = window.location.origin + window.location.pathname + '?owner=' + this.selectedRepo.owner.login + '&repo=' + this.selectedRepo.name + '&workflowId=' + this.selectedWorkflow + '&apiKey=' + this.apiKey;
+                },
+
+            }
+        })
+    </script>
+</body>
+
+</html>

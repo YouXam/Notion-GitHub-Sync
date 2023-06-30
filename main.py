@@ -13,7 +13,18 @@ from notion_client import AsyncClient
 from dateutil import parser as dateutil
 
 logging.basicConfig(level=logging.DEBUG if os.environ.get("debug") else logging.INFO)
-author = "From Notion"
+author = None
+
+async def getAuthor(page):
+    if author is not None:
+        return author
+    try:
+        notion = AsyncClient(auth=os.environ["NOTION_TOKEN"])
+        res = await notion.users.retrieve(user_id=page["created_by"]["id"])
+        return res['name']
+    except Exception as e:
+        logging.error(e)    
+    return 'From Notion'
 
 def extrat_block_id(url):
     return url.split('/')[-1].split('?')[0].split('-')[-1]
@@ -73,8 +84,9 @@ async def update_file(path, block_id=None):
     except Exception as e:
         logging.warning(e)
 
-    if front_matter.get('author') is None:
-        front_matter['author'] = author
+    remote_author = await getAuthor(page)
+    if front_matter.get('author') != remote_author:
+        front_matter['author'] = remote_author
         if_update = True
 
     last_edited_time = page['last_edited_time']

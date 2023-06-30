@@ -117,14 +117,20 @@ async def update_list(path):
     notion = AsyncClient(auth=os.environ["NOTION_TOKEN"])
     res = await notion.databases.query(database_id=database_id)
     assert res["object"] == "list"
+    all_pages = set()
     for page in res["results"]:
         logging.debug(f"{page['id']=}")
+        all_pages.add(page["id"])
         fpath = os.path.join(os.path.dirname(path), f"notion/{page['id']}")
         if not os.path.exists(fpath):
             os.makedirs(fpath)
         begin = time.time()
         await update_file(os.path.join(fpath, f"{page['id']}.md"), page["id"])
         time.sleep(max(0, 1 - (time.time() - begin)))
+    now_list = set(os.listdir(os.path.join(os.path.dirname(path), "notion")))
+    for page in now_list - all_pages:
+        shutil.rmtree(os.path.join(os.path.join(os.path.dirname(path), "notion"), page))
+        logging.info(f"[*] Removed {page}")
 
 print("====== notion-sync ======")
 if __name__ == '__main__':

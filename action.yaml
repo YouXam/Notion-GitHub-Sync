@@ -19,7 +19,7 @@ runs:
     - name: Checkout repository
       uses: actions/checkout@v2
       with:
-        repository: 'YouXam/notion-sync'
+        repository: 'YouXam/Notion-GitHub-Sync'
         path: "notion-sync"
   
     - name: Setup python

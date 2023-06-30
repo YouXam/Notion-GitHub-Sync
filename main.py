@@ -13,7 +13,7 @@ from notion_client import AsyncClient
 from dateutil import parser as dateutil
 
 logging.basicConfig(level=logging.DEBUG if os.environ.get("debug") else logging.INFO)
-
+author = "From Notion"
 
 def extrat_block_id(url):
     return url.split('/')[-1].split('?')[0].split('-')[-1]
@@ -63,6 +63,20 @@ async def update_file(path, block_id=None):
             if_update = True
     except Exception as e:
         logging.warning(e)
+
+    try:
+        date = page['created_time']
+        date = date.replace('T', ' ').replace('Z', '')
+        if front_matter.get('date') is None:
+            front_matter['date'] = date
+            if_update = True
+    except Exception as e:
+        logging.warning(e)
+
+    if front_matter.get('author') is None:
+        front_matter['author'] = author
+        if_update = True
+
     last_edited_time = page['last_edited_time']
     last_edited_time = last_edited_time.replace('T', ' ').replace('Z', '')
     logging.debug(f"{last_edited_time=}")
@@ -135,11 +149,14 @@ async def update_list(path):
 print("====== notion-sync ======")
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        print('Usage: python main.py <path>')
+        print('Usage: python main.py <path> [token] [author]')
         exit(0)
     
     if len(sys.argv) > 2:
         os.environ["NOTION_TOKEN"] = sys.argv[2]
+
+    if len(sys.argv) > 3:
+        author = sys.argv[3]
 
     failed = False
     print("WORK DIR:", sys.argv[1])

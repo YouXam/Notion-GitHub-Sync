@@ -14,6 +14,10 @@ from dateutil import parser as dateutil
 
 logging.basicConfig(level=logging.DEBUG if os.environ.get("debug") else logging.INFO)
 author = None
+change = {
+    "updated": [],
+    "deleted": []
+}
 
 async def request_wrapper(job):
     begin = time.time()
@@ -146,6 +150,7 @@ async def update_file(path, block_id=None, page=None):
     finally:
         shutil.rmtree(f'{block_id}_tmp')
     print(f"[+] {path} is successfully updated.")
+    change['updated'].append(path)
 
 
 async def update_list(path):
@@ -169,6 +174,7 @@ async def update_list(path):
     for page in now_list - all_pages:
         shutil.rmtree(os.path.join(os.path.join(os.path.dirname(path), "notion"), page))
         logging.info(f"[*] Removed {page}")
+        change['deleted'].append(page)
 
 print("====== notion-sync ======")
 if __name__ == '__main__':
@@ -201,8 +207,21 @@ if __name__ == '__main__':
                 import traceback
                 traceback.print_exception(type(e), e, e.__traceback__)
             
+    summary = ''
+    detail = ''
+    if len(change['updated']) > 0:
+        summary += f"Updated {len(change['updated'])} file(s)"
+    if len(change['deleted']) > 0:
+        if len(summary) > 0:
+            summary += " and "
+        summary += f"Deleted {len(change['deleted'])} file(s)"
+    for file in change['updated']:
+        detail += f"Updated {file}\n"
+    for file in change['deleted']:
+        detail += f"Deleted {file}\n"
 
+    with open("/tmp/changelog", "w") as f:
+        f.write(summary + "\n" + detail)
 
-    
     if failed:
         exit(1)

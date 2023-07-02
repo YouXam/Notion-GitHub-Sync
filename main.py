@@ -15,12 +15,21 @@ from dateutil import parser as dateutil
 logging.basicConfig(level=logging.DEBUG if os.environ.get("debug") else logging.INFO)
 author = None
 
+async def request_wrapper(job):
+    begin = time.time()
+    res = await job()
+    end = time.time()
+    time.sleep(max(0, 0.35 - (end - begin)))
+    return res
+
 async def getAuthor(page):
     if author is not None:
         return author
     try:
         notion = AsyncClient(auth=os.environ["NOTION_TOKEN"])
-        res = await notion.users.retrieve(user_id=page["created_by"]["id"])
+        async def job():
+            return await notion.users.retrieve(user_id=page["created_by"]["id"])
+        res = await request_wrapper(job)
         return res['name']
     except Exception as e:
         logging.error(e)    
@@ -63,7 +72,9 @@ async def update_file(path, block_id=None, page=None):
     logging.debug(f"{block_id=}")
     
     if page is None:
-        page = await notion.pages.retrieve(page_id=block_id)
+        async def job():
+            return await notion.pages.retrieve(page_id=block_id)
+        page = await request_wrapper(job)
     logging.debug(f"{page=}")
 
     if_update = False
@@ -142,7 +153,9 @@ async def update_list(path):
         database_id = f.read()
     database_id = extrat_block_id(database_id)
     notion = AsyncClient(auth=os.environ["NOTION_TOKEN"])
-    res = await notion.databases.query(database_id=database_id)
+    async def job():
+        return await notion.databases.query(database_id=database_id)
+    res = await request_wrapper(job)
     assert res["object"] == "list"
     all_pages = set()
     for page in res["results"]:
@@ -151,9 +164,7 @@ async def update_list(path):
         fpath = os.path.join(os.path.dirname(path), f"notion/{page['id']}")
         if not os.path.exists(fpath):
             os.makedirs(fpath)
-        begin = time.time()
         await update_file(os.path.join(fpath, f"{page['id']}.md"), page["id"], page)
-        time.sleep(max(0, 1 - (time.time() - begin)))
     now_list = set(os.listdir(os.path.join(os.path.dirname(path), "notion")))
     for page in now_list - all_pages:
         shutil.rmtree(os.path.join(os.path.join(os.path.dirname(path), "notion"), page))
@@ -179,10 +190,8 @@ if __name__ == '__main__':
             full_path = os.path.join(root, file)
             try:
                 if file.endswith('.md'):
-                    begin = time.time()
                     logging.debug(f"found file {file}")
                     asyncio.run(update_file(full_path))
-                    time.sleep(max(0, 1 - (time.time() - begin)))
                 elif file.endswith(".notion_list"):
                     logging.debug(f"found list {file}")
                     asyncio.run(update_list(full_path))

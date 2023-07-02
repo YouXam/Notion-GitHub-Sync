@@ -44,7 +44,7 @@ def extrat_front_matter(path):
     return front_matter
 
 
-async def update_file(path, block_id=None):
+async def update_file(path, block_id=None, page=None):
     logging.debug(f"updating {path}")
 
     notion = AsyncClient(auth=os.environ["NOTION_TOKEN"])
@@ -62,7 +62,8 @@ async def update_file(path, block_id=None):
         block_id = extrat_block_id(url)
     logging.debug(f"{block_id=}")
     
-    page = await notion.pages.retrieve(page_id=block_id)
+    if page is None:
+        page = await notion.pages.retrieve(page_id=block_id)
     logging.debug(f"{page=}")
 
     if_update = False
@@ -151,7 +152,7 @@ async def update_list(path):
         if not os.path.exists(fpath):
             os.makedirs(fpath)
         begin = time.time()
-        await update_file(os.path.join(fpath, f"{page['id']}.md"), page["id"])
+        await update_file(os.path.join(fpath, f"{page['id']}.md"), page["id"], page)
         time.sleep(max(0, 1 - (time.time() - begin)))
     now_list = set(os.listdir(os.path.join(os.path.dirname(path), "notion")))
     for page in now_list - all_pages:

@@ -150,7 +150,7 @@ async def update_file(path, block_id=None, page=None):
     finally:
         shutil.rmtree(f'{block_id}_tmp')
     print(f"[+] {path} is successfully updated.")
-    change['updated'].append(path)
+    change['updated'].append(front_matter.get('title') or path)
 
 
 async def update_list(path):
@@ -174,6 +174,7 @@ async def update_list(path):
     for page in now_list - all_pages:
         shutil.rmtree(os.path.join(os.path.join(os.path.dirname(path), "notion"), page))
         logging.info(f"[*] Removed {page}")
+        # TODO: use title instead of path
         change['deleted'].append(page)
 
 print("====== notion-sync ======")

@@ -12,6 +12,7 @@ import yaml
 from notion2md.exporter.block import MarkdownExporter
 from notion_client import AsyncClient
 from dateutil import parser as dateutil
+from translate import translate
 
 logging.basicConfig(level=logging.DEBUG if os.environ.get("debug") else logging.INFO)
 author = None
@@ -58,10 +59,13 @@ def extrat_front_matter(path):
     front_matter = yaml.load(front_matter_str, Loader=yaml.FullLoader)
     return front_matter
 
+def get_title(page):
+    title = page["properties"].get("Name") or page["properties"]['title']
+    title = title["title"][0]["plain_text"]
+    return title
 
 async def update_file(path, block_id=None, page=None, forceUpdate=False):
     logging.debug(f"updating {path}")
-
     notion = AsyncClient(auth=os.environ["NOTION_TOKEN"])
     if os.path.isfile(path):
         front_matter = extrat_front_matter(path)
@@ -85,14 +89,12 @@ async def update_file(path, block_id=None, page=None, forceUpdate=False):
 
     if_update = False
     try:
-        title = page["properties"].get("Name") or page["properties"]['title']
-        title = title["title"][0]["plain_text"]
+        title = get_title(page)
         if front_matter.get('title') != title:
             front_matter['title'] = title
             if_update = True
     except Exception as e:
         logging.warning(e)
-
     try:
         date = page['created_time']
         date = date.replace('T', ' ').replace('Z', '')
@@ -102,16 +104,13 @@ async def update_file(path, block_id=None, page=None, forceUpdate=False):
     except Exception as e:
         logging.warning(e)
 
-
-    if page.get('url'):
+    if page.get('url') is not None and front_matter.get('from_notion') != page['url']:
         front_matter['from_notion'] = page['url']
         if_update = True
-
     remote_author = await getAuthor(page)
     if front_matter.get('author') != remote_author:
         front_matter['author'] = remote_author
         if_update = True
-
     last_edited_time = page['last_edited_time']
     last_edited_time = last_edited_time.replace('T', ' ').replace('Z', '')
     logging.debug(f"{last_edited_time=}")
@@ -184,30 +183,58 @@ async def update_list(file_path):
     new_files = set()
     for page in res["results"]:
         logging.debug(f"{page['id']=}")
-        ppath = f"{page['id']}" if subdir else ""
+        rtitle = get_title(page)
+        if old_files.get(page["id"]) and isinstance(old_files[page["id"]], dict) and old_files[page["id"]].get("rtitle") == rtitle:
+            title = old_files[page["id"]]["title"]
+        else:
+            if rtitle:
+                title = translate(rtitle)
+                if subdir:
+                    ext = ""
+                else:
+                    ext = ".md"
+                if os.path.exists(os.path.join("notion", f"{title}{ext}")):
+                    for i in range(1, 100):
+                        if os.path.exists(os.path.join("notion", f"{title}_{i}{ext}")):
+                            continue
+                        title = f"{title}_{i}"
+                        break
+            else:
+                title = page['id']
+
+        ppath = title if subdir else ""
         fpath = os.path.join(dir_path, f"notion/{ppath}")
         if not os.path.exists(fpath):
             os.makedirs(fpath)
+
         forceUpdate = False
         if not old_files.get(page["id"]):
             forceUpdate = True
-        markdown_path = os.path.join(fpath, f"{page['id']}.md")
+        
+        markdown_path = os.path.join(fpath, "index.md" if subdir else f"{title}.md")
         files = await update_file(markdown_path, page["id"], page, forceUpdate=forceUpdate)
-        file_list = old_files.get(page["id"], [])
+        if isinstance(old_files.get(page["id"]), dict):
+            file_list = old_files.get(page["id"], {}).get('files', [])
+        else:
+            file_list = []
         if subdir:
-            new_files.add(page['id'])
-            file_list = [page['id']]
+            new_files.add(title)
+            file_list = [title]
         else:
             if files is not None:
-                new_files.add(f"{page['id']}.md")
-                file_list = [f"{page['id']}.md"]
+                new_files.add(f"{title}.md")
+                file_list = [f"{title}.md"]
                 for file in files:
-                    new_files.add(os.path.join(ppath, file))
-                    file_list.append(os.path.join(ppath, file))
+                    new_files.add(file)
+                    file_list.append(file)
             else:
                 for file in file_list:
                     new_files.add(file)
-        old_files[page["id"]] = file_list
+        if not isinstance(old_files.get(page["id"]), dict):
+            old_files[page["id"]] = {}
+        old_files[page["id"]]['files'] = file_list
+        old_files[page["id"]]['title'] = title
+        old_files[page["id"]]['rtitle'] = rtitle
     now_files = set(os.listdir(os.path.join(dir_path, "notion")))
     for files in now_files - new_files:
         if files.endswith(".notion_files"):
@@ -221,7 +248,7 @@ async def update_list(file_path):
         change['deleted'].append(files)
 
     with open(os.path.join(dir_path, "notion/.notion_files"), "w") as f:
-        json.dump(old_files, f, indent=2)
+        json.dump(old_files, f, indent=2, ensure_ascii=False)
 
 print("====== notion-sync ======")
 if __name__ == '__main__':

@@ -4,6 +4,7 @@ import os
 import logging
 import time
 import shutil
+import json
 import sys
 import zipfile
 
@@ -18,6 +19,7 @@ change = {
     "updated": [],
     "deleted": []
 }
+subdir = False if os.environ.get("SUBDIR") == 'false' else True
 
 async def request_wrapper(job):
     begin = time.time()
@@ -57,7 +59,7 @@ def extrat_front_matter(path):
     return front_matter
 
 
-async def update_file(path, block_id=None, page=None):
+async def update_file(path, block_id=None, page=None, forceUpdate=False):
     logging.debug(f"updating {path}")
 
     notion = AsyncClient(auth=os.environ["NOTION_TOKEN"])
@@ -65,7 +67,7 @@ async def update_file(path, block_id=None, page=None):
         front_matter = extrat_front_matter(path)
         if front_matter.get('notion_url') is None and front_matter.get('notion-url') is None and block_id is None:
             logging.debug(f"{front_matter.get('notion_url')=} and {front_matter.get('notion-url')=}, skip")
-            return
+            return None
     else:
         front_matter = {}
     logging.debug(f"{front_matter=}")
@@ -113,9 +115,9 @@ async def update_file(path, block_id=None, page=None):
         local_last_edited_time_timestamp = dateutil.parse(front_matter['last_edited_time']).timestamp()
         if remote_last_edited_time_timestamp > local_last_edited_time_timestamp:
             if_update = True
-    if not if_update:
+    if not if_update and not forceUpdate:
         print(f'[-] {path} is up to date, skip.')
-        return
+        return None
     front_matter['last_edited_time'] = last_edited_time
     
     MarkdownExporter(block_id=block_id,output_path='.',download=True).export()
@@ -134,48 +136,87 @@ async def update_file(path, block_id=None, page=None):
             f.write(content)
     except Exception as e:
         logging.error("Error:" + str(e))
-        return
+        return None
     finally:
         os.remove(f'{block_id}_tmp/{block_id}.md')
+    files = []
     try:
         path_dir = os.path.dirname(path)
         for file in glob.glob(f'{block_id}_tmp/*'):
+            files.append(file.replace(f'{block_id}_tmp/', ''))
             if os.path.isdir(file):
                 shutil.copytree(file, path_dir)
             else:
                 shutil.copy(file, path_dir)
     except Exception as e:
         logging.error("Error:" + str(e))
-        return
+        return None
     finally:
         shutil.rmtree(f'{block_id}_tmp')
     print(f"[+] {path} is successfully updated.")
     change['updated'].append(front_matter.get('title') or path)
+    return files
 
 
-async def update_list(path):
-    with open(path, "r") as f:
+async def update_list(file_path):
+    with open(file_path, "r") as f:
         database_id = f.read()
+
+    dir_path = os.path.dirname(file_path)
     database_id = extrat_block_id(database_id)
     notion = AsyncClient(auth=os.environ["NOTION_TOKEN"])
     async def job():
         return await notion.databases.query(database_id=database_id)
     res = await request_wrapper(job)
     assert res["object"] == "list"
-    all_pages = set()
+
+    if os.path.isfile(os.path.join(dir_path, "notion/.notion_files")):
+        with open(os.path.join(dir_path, "notion/.notion_files"), "r") as f:
+            old_files = json.load(f)
+    else:
+        old_files = {}
+
+    new_files = set()
     for page in res["results"]:
         logging.debug(f"{page['id']=}")
-        all_pages.add(page["id"])
-        fpath = os.path.join(os.path.dirname(path), f"notion/{page['id']}")
+        ppath = f"{page['id']}" if subdir else ""
+        fpath = os.path.join(dir_path, f"notion/{ppath}")
         if not os.path.exists(fpath):
             os.makedirs(fpath)
-        await update_file(os.path.join(fpath, f"{page['id']}.md"), page["id"], page)
-    now_list = set(os.listdir(os.path.join(os.path.dirname(path), "notion")))
-    for page in now_list - all_pages:
-        shutil.rmtree(os.path.join(os.path.join(os.path.dirname(path), "notion"), page))
-        logging.info(f"[*] Removed {page}")
-        # TODO: use title instead of path
-        change['deleted'].append(page)
+        forceUpdate = False
+        if not old_files.get(page["id"]):
+            forceUpdate = True
+        markdown_path = os.path.join(fpath, f"{page['id']}.md")
+        files = await update_file(markdown_path, page["id"], page, forceUpdate=forceUpdate)
+        file_list = old_files.get(page["id"], [])
+        if subdir:
+            new_files.add(page['id'])
+            file_list = [page['id']]
+        else:
+            if files is not None:
+                new_files.add(f"{page['id']}.md")
+                file_list = [f"{page['id']}.md"]
+                for file in files:
+                    new_files.add(os.path.join(ppath, file))
+                    file_list.append(os.path.join(ppath, file))
+            else:
+                for file in file_list:
+                    new_files.add(file)
+        old_files[page["id"]] = file_list
+    now_files = set(os.listdir(os.path.join(dir_path, "notion")))
+    for files in now_files - new_files:
+        if files.endswith(".notion_files"):
+            continue
+        path = os.path.join(os.path.join(dir_path, "notion"), files)
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+        else:
+            os.remove(path)
+        logging.info(f"[*] Removed {files}")
+        change['deleted'].append(files)
+
+    with open(os.path.join(dir_path, "notion/.notion_files"), "w") as f:
+        json.dump(old_files, f, indent=2)
 
 print("====== notion-sync ======")
 if __name__ == '__main__':

@@ -102,6 +102,11 @@ async def update_file(path, block_id=None, page=None, forceUpdate=False):
     except Exception as e:
         logging.warning(e)
 
+
+    if page.get('url'):
+        front_matter['from_notion'] = page['url']
+        if_update = True
+
     remote_author = await getAuthor(page)
     if front_matter.get('author') != remote_author:
         front_matter['author'] = remote_author

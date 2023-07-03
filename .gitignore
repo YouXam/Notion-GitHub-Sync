@@ -162,3 +162,5 @@ cython_debug/
 
 .notion_list
 notion/
+
+.DS_Store

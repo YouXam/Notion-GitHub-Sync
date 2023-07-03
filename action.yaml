@@ -11,6 +11,10 @@ inputs:
   author:
     description: "Articles's author. If left blank, then get from notion."
     required: false
+  subdir:
+    description: 'Whether to use subfolders to organize each article.'
+    required: false
+    default: true
 runs:
   using: 'composite'
   steps:
@@ -39,7 +43,7 @@ runs:
     - name: Sync Notion to Github
       shell: bash
       run: |
-        python ${{ github.workspace }}/notion-sync/main.py ${{ github.workspace }}/github/ ${{ inputs.notion_token }} ${{ inputs.author }}
+        SUBDIR=${{ inputs.subdir }} python ${{ github.workspace }}/notion-sync/main.py ${{ github.workspace }}/github/ ${{ inputs.notion_token }} ${{ inputs.author }}
 
     - name: Commit and push if changes
       shell: bash

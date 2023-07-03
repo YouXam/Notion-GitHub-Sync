@@ -46,3 +46,21 @@ notion-url: https://www.notion.so/xxxx/xxxx
 Then, when the workflow runs, the content of `example.md` will be replaced with the content of the Notion page at `https://www.notion.so/xxxx/xxxx`.
 
 Note: All this Notion pages you use must be connected to your integration.
+
+## Inputs
+
+### `notion_token`
+
+**Required** The token for your Notion integration. You can find it [here](https://www.notion.so/my-integrations).
+
+### `author`
+
+**Optional** Articles's author. If left blank, then get from notion.
+
+### `subdir`
+
+**Optional** Whether to use subfolders to organize each article, defaults to `true`.
+
+if subdir is true, then the article and its files will be saved in `notion/${article_id}`, otherwise, they will be saved in `notion`.
+
+
